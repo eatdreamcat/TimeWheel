@@ -11,12 +11,17 @@ namespace Framework.Timer
 
         #region 对象池接口
 
-        public void Recycle()
+        public void OnRecycle()
         {
             throw new System.NotImplementedException();
         }
 
-        public void Fetch()
+        public void OnReuse()
+        {
+            throw new System.NotImplementedException();
+        }
+
+        public void OnCreate()
         {
             throw new System.NotImplementedException();
         }

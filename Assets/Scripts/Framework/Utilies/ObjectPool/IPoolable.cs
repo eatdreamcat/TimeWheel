@@ -4,10 +4,12 @@ using UnityEngine;
 
 namespace Framework.ObjectPool
 {
-    interface IPoolable
+    public interface IPoolable
     {
-        public void Recycle();
-        public void Fetch();
+        public void OnRecycle();
+        public void OnReuse();
         
+        public void OnCreate();
+
     }
 }
