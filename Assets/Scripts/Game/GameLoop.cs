@@ -21,7 +21,7 @@ public class GameLoop : MonoBehaviour
         // 时间轮进位准确度测试
         // Test.Timer.TimerTest.TestWheelIndexCalculate(1, 56, 512);
         // Test.Timer.TimerTest.TestWheelIndexCalculate(1, 57, 512);
-        Test.Timer.TimerTest.TestWheelIndexCalculate(262143, 33, 0);
+        // Test.Timer.TimerTest.TestWheelIndexCalculate(262143, 33, 0);
         
         // 测试时间轮的分级
         // Test.Timer.TimerTest.TestIndexInLevelsWithJiffies();
@@ -33,7 +33,7 @@ public class GameLoop : MonoBehaviour
         // Test.Timer.TimerTest.TestIntervalTask(1000, 100);
         
         // 压力测试
-        // yield return Test.Timer.TimerTest.PressureTest(100000, 100, 10000);
+        yield return Test.Timer.TimerTest.PressureTest(1000000, 100, 1000000000);
     }
     
     // Update is called once per frame

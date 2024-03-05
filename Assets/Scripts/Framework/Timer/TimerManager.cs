@@ -165,7 +165,7 @@ namespace Framework.Timer
             
             // 执行
             PushJiffies(totalJiffCount);
-            Debug.Log(totalJiffCount);
+            
         }
 
         private static void TaskShift()
