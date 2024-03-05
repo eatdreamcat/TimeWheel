@@ -505,43 +505,69 @@ namespace Framework.Timer
         /// <param name="delay">延迟毫秒数</param>
         public static void ModifyDelay(uint taskId, uint delay)
         {
-            
+            if (s_TaskMap.TryGetValue((int)taskId, out var task))
+            {
+                UpdateTaskExpires(task, delay);
+            }
         }
 
         public static void ModifyCallback<T1, T2>(uint taskId, Action<object, object> callback, 
             T1 param1, T2 param2, TaskType type)
         {
-            
+            if (s_TaskMap.TryGetValue((int)taskId, out var task))
+            {
+                task.SetCallback(callback, param1, param2);
+                task.SetType(type);
+            }
         }
         
         public static void ModifyCallback<T1, T2>(uint taskId, Action<object, object> callback, T1 param1, T2 param2)
         {
-            
+            if (s_TaskMap.TryGetValue((int)taskId, out var task))
+            {
+                task.SetCallback(callback, param1, param2);
+            }
         }
         
         public static void ModifyCallback(uint taskId, Action<object, object> callback, TaskType type)
         {
-            
+            if (s_TaskMap.TryGetValue((int)taskId, out var task))
+            {
+                task.SetCallback(callback);
+                task.SetType(type);
+            }
         }
 
         public static void ModifyCallback(uint taskId, Action<object, object> callback)
         {
-            
+            if (s_TaskMap.TryGetValue((int)taskId, out var task))
+            {
+                task.SetCallback(callback);
+            }
         }
         
         public static void ModifyParameters<T1, T2>(uint taskId, T1 param1, T2 param2)
         {
-            
+            if (s_TaskMap.TryGetValue((int)taskId, out var task))
+            {
+                task.SetParameters(param1, param2);
+            }
         }
 
         public static void ModifyToSyncTask(uint taskId)
         {
-            
+            if (s_TaskMap.TryGetValue((int)taskId, out var task))
+            {
+                task.SetType(TaskType.Sync);
+            }
         }
 
         public static void ModifyToAsyncTask(uint taskId)
         {
-            
+            if (s_TaskMap.TryGetValue((int)taskId, out var task))
+            {
+                task.SetType(TaskType.Async);
+            }
         }
         
         public static void RemoveTask(int taskId)

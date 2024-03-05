@@ -71,10 +71,21 @@ namespace Framework.Timer
         private object m_Param1;
         private object m_Param2;
         
+        public void SetParameters<T1, T2>(T1 param1, T2 param2)
+        {
+            m_Param1 = param1;
+            m_Param2 = param2;
+        }
+        
         public void SetCallback<T1, T2>(Action<object, object> callback, T1 param1, T2 param2)
         {
             m_Param1 = param1;
             m_Param2 = param2;
+            m_Action = callback;
+        }
+        
+        public void SetCallback(Action<object, object> callback)
+        {
             m_Action = callback;
         }
         
