@@ -29,7 +29,7 @@ namespace Framework.Timer
         /// <summary>
         /// 频率，即每秒钟Tick多少次
         /// </summary>
-        private const ulong k_HZ = 1000;
+        private const ulong k_HZ = 60;
         
         /// <summary>
         /// 时间轮的级数
@@ -165,7 +165,7 @@ namespace Framework.Timer
             
             // 执行
             PushJiffies(totalJiffCount);
-               
+            Debug.Log(totalJiffCount);
         }
 
         private static void TaskShift()

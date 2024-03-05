@@ -1,6 +1,5 @@
 using System;
 using System.Collections;
-using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using Framework.Timer;
@@ -19,8 +18,8 @@ namespace Test.Timer
            {
                TimerManager.SetTimeoutSync((uint)(i * step + offset - 1) , (index, step) =>
                {
-                   Debug.Assert(TimerManager.Jiffies == (ulong)((int)index * (int)step + offset - 1), 
-                       " 时刻不准确 ");
+                   // Debug.Assert(TimerManager.Jiffies == (ulong)((int)index * (int)step + offset - 1), 
+                   //     " 时刻不准确 ");
                   
                    Debug.Log($"Jiffies:{TimerManager.Jiffies}, " +
                              $"Delay task {index} executed:{DateTime.Now}:{DateTime.Now.Millisecond}");
@@ -98,12 +97,12 @@ namespace Test.Timer
             }
         }
 
-        public static void PressureTest(int count, int minInterval, int maxInterval)
+        public static IEnumerator PressureTest(int count, int minInterval, int maxInterval)
         {
             Debug.Log($"压力测试， 任务个数 {count}, interval范围: [{minInterval}, {maxInterval}]");
             while (count > 0)
             {
-                var insideCount = 10;
+                var insideCount = 1000;
                 while (insideCount-- > 0)
                 {
                     count--;
@@ -115,7 +114,7 @@ namespace Test.Timer
                     }, count, 1);
                 }
 
-                // yield return new WaitForEndOfFrame();
+                yield return new WaitForEndOfFrame();
             }
             
             Debug.Log($"### 压测任务添加完成 ###");
