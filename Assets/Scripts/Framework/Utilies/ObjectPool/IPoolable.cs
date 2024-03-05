@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace Framework.ObjectPool
 {
-    public interface IPoolable
+    internal interface IPoolable
     {
         public void OnRecycle();
         public void OnReuse();

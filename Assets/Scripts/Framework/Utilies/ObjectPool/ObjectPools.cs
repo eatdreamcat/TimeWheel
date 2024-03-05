@@ -1,11 +1,10 @@
-using System.Collections;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using UnityEngine;
 
 namespace Framework.ObjectPool
 {
-    public class ObjectPool<T> where T : IPoolable, new()
+    internal class ObjectPool<T> where T : IPoolable, new()
     {
         private List<T> m_Pool = new();
         public T Get()
@@ -29,15 +28,6 @@ namespace Framework.ObjectPool
         {
             obj.OnRecycle();
             this.m_Pool.Add(obj);
-        }
-    }
-    
-    public class ObjectPools 
-    {
-        private static ConcurrentDictionary<> 
-        public static ObjectPool<T> GetPool<T>()
-        {
-            
         }
     }
 }
