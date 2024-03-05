@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using Framework.ObjectPool;
 using UnityEngine;
@@ -84,7 +85,12 @@ namespace Framework.Timer
         private const float k_MillisecondInOneJiff =  k_Milliseconds / k_HZ;
         
         // 从启动到当前的jiff数
-        private static ulong s_Jiffies;
+        private static ulong s_Jiffies = 0;
+
+    // TODO：移除测试代码
+        public static ulong Jiffies => s_Jiffies;
+
+        
 
         // Task对象池
         private static ObjectPool<TimerTask> s_TaskPool = new ();
@@ -99,10 +105,17 @@ namespace Framework.Timer
         
         // private static ReaderWriterLockSlim s_LockSlim = new ();
 
+        static TimerManager()
+        {
+            for (int i = 0; i < (int)k_WheelSize; ++i)
+            {
+                s_TaskWheelList.Add(new ConcurrentQueue<TimerTask>());
+            }
+        }
+        
         private static void AddToScheduler(TimerTask task, uint delay = 0)
         {
-            task.Expires = 
-                MillisecondsToJiffies(delay) + task.Interval + s_Jiffies;
+            
             var index = (int)CalculateWheelIndex(task.Expires);
             
             // TODO: 考虑到用户是否可能在子线程调用 SetInterval 来添加Task
@@ -110,11 +123,19 @@ namespace Framework.Timer
             s_TaskWheelList[index].Enqueue(task);
             
         }
+
+        private static void UpdateTaskExpires(TimerTask task, uint delay = 0)
+        {
+            task.Expires = 
+                MillisecondsToJiffies(delay) + task.Interval + s_Jiffies;
+        }
         
         private static bool AddTask(TimerTask task, uint delay = 0)
         {
             if (s_TaskMap.TryAdd(task.ID, task))
             {
+                UpdateTaskExpires(task, delay);
+                
                 AddToScheduler(task, delay);
                 
                 return true;
@@ -134,7 +155,6 @@ namespace Framework.Timer
             if (s_TaskMap.Count <= 0)
             {
                 s_Jiffies = 0;
-                
                 return;
             }
             
@@ -146,16 +166,37 @@ namespace Framework.Timer
             // 执行
             PushJiffies(totalJiffCount);
                
-            // Task Cascade
-            CascadeTasks();
         }
 
-        private static void CascadeTasks()
+        private static void TaskShift()
         {
-            var levels = k_Depth;
-            while (levels-- > 0)
+            if (s_Jiffies <= 0)
             {
-                
+                return;
+            }
+            
+            var levels = k_Depth;
+            while (--levels >= 1)
+            {
+                if ((s_Jiffies & (ulong)((1 << levels * k_LevelClockShiftBits) - 1)) == 0)
+                {
+                    var index = CalculateIndex(s_Jiffies - 1, (uint)levels, 0ul);
+                    var taskBucket = s_TaskWheelList[(int)index];
+                 
+                    while (taskBucket.Count > 0)
+                    {
+                        var count = taskBucket.Count;
+                        if (taskBucket.TryDequeue(out var task))
+                        {
+                            AddToScheduler(task);
+
+                            if (count == taskBucket.Count)
+                            {
+                                throw new Exception(" error !!! ");
+                            }
+                        }
+                    }
+                }
             }
         }
         
@@ -164,21 +205,43 @@ namespace Framework.Timer
             while (totalJiffCount-- > 0)
             {
                 int currClock = (int)(s_Jiffies & k_LevelMask);
+                
+                ExecuteTasks(currClock);
+                
+                TaskShift();
+                
+                ExecuteTasks(currClock);
+                
                 ++s_Jiffies;
+            }
+        }
 
-                var expiredTaskQueue = s_TaskWheelList[currClock];
-                // TODO： 是否有必要加锁， 本身ConcurrentQueue就是线程安全，但是外部的时间轮List不是线程安全
-                // TODO:  如果加锁，那其实应该用Try包裹起来，因为无法确定用户的Callback是否会抛异常
-                while (expiredTaskQueue.Count > 0)
+        private static void ExecuteTasks(int clock)
+        {
+            var expiredTaskQueue = s_TaskWheelList[clock];
+            // TODO： 是否有必要加锁， 本身ConcurrentQueue就是线程安全，但是外部的时间轮List不是线程安全
+            // TODO:  如果加锁，那其实应该用Try包裹起来，因为无法确定用户的Callback是否会抛异常
+            while (expiredTaskQueue.Count > 0)
+            {
+                if (expiredTaskQueue.TryDequeue(out var task))
                 {
-                    if (expiredTaskQueue.TryDequeue(out var task))
+                    if (task.Valid())
                     {
                         task.Execute();
 
                         if (task.CanLoop())
                         {
+                            UpdateTaskExpires(task);
                             AddToScheduler(task);
                         }
+                        else
+                        {
+                            RemoveTask(task.ID);
+                        }
+                    }
+                    else
+                    {
+                        RemoveTask(task.ID);
                     }
                 }
             }
@@ -205,12 +268,12 @@ namespace Framework.Timer
         {
             return k_LevelSize << (int)((level - 1u) * k_LevelClockShiftBits);
         }
-
-        private static ulong LevelGranularity(int level)
-        {
-            int shift = level * k_LevelClockShiftBits;
-            return 1UL << shift;
-        }
+        //
+        // private static ulong LevelGranularity(int level)
+        // {
+        //     int shift = level * k_LevelClockShiftBits;
+        //     return 1UL << shift;
+        // }
         
         /// <summary>
         /// 获取每一级的bucket下标起点
@@ -228,6 +291,12 @@ namespace Framework.Timer
         /// <returns></returns>
         private static uint CalculateWheelIndex(ulong expires)
         {
+            if (expires <= s_Jiffies)
+            {
+                // 到期任务
+                return (uint)(s_Jiffies + 1 & k_LevelMask);
+            }
+            
             var delta = expires - s_Jiffies;
             
             // 从 1 到 8 个level
@@ -235,19 +304,15 @@ namespace Framework.Timer
             {
                 if (delta < LevelStartJiffies(level))
                 {
-                    return CalculateIndex(expires, level - 1u);
+                    return CalculateIndex(expires, level - 1u, LevelStartJiffies(level - 1));
                 }
             }
 
-            if (delta <= 0)
-            {
-                return (uint)(s_Jiffies & k_LevelMask);
-            }
-
+            // 第 9 个Level
             if (delta >= k_WheelTimeoutCutoff)
             {
                 expires = s_Jiffies + k_WheelTimeoutMax;
-                return CalculateIndex(expires, k_Depth - 1);
+                return CalculateIndex(expires, k_Depth - 1, LevelStartJiffies(k_Depth - 1));
             }
 
             throw new Exception($"WheelIndex计算出错, 非法的delta:{delta}");
@@ -258,8 +323,9 @@ namespace Framework.Timer
         /// </summary>
         /// <param name="expires">到期时间</param>
         /// <param name="level">时间轮等级</param>
+        /// <param name="levelStartJiffies">当前level下的jiffies起点</param>
         /// <returns></returns>
-        private static uint CalculateIndex(ulong expires, uint level)
+        private static uint CalculateIndex(ulong expires, uint level, ulong levelStartJiffies)
         {
             // ReSharper disable once InvalidXmlDocComment
             /**
@@ -279,9 +345,11 @@ namespace Framework.Timer
              *     但是需要注意，此时clk已经跑了60，
              *     代表第level 2 跑了8格，所以index放在第二级的16格，代表需要再跑8格，正好是64clk
              *
-             *     [0-63][64-127] 
+             *     [0-63][64-127]
              */
-            expires = (expires >> ((int)(k_LevelClockShiftBits * level))) + 1;
+            int levelShiftBits = (int)(k_LevelClockShiftBits * level);
+            expires -= levelStartJiffies;
+            expires = (expires >> levelShiftBits);
             return GetLevelOff(level) + (uint)(expires & k_LevelMask);
         }
         
@@ -308,7 +376,6 @@ namespace Framework.Timer
             task.LoopTimes = loopTimes;
             task.Interval = MillisecondsToJiffies(interval);
             task.SetCallback(callback, param1, param2);
-            task.SetRemoved(false);
             task.SetType(type);
             
             if (AddTask(task))
@@ -334,8 +401,8 @@ namespace Framework.Timer
             
             var task = s_TaskPool.Get();
             task.SetCallback(callback, param1, param2);
-            task.SetRemoved(false);
             task.SetType(type);
+            task.SetOnce();
             
             if (AddTask(task, delay))
             {
@@ -481,6 +548,7 @@ namespace Framework.Timer
         {
             if (s_TaskMap.TryRemove(taskId, out var task))
             {
+                // Debug.Log($"Task Remove:{task.ID}, task expires:{task.Expires}");
                 s_TaskPool.Recycle(task);
             }
             

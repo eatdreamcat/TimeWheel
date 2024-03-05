@@ -60,16 +60,6 @@ namespace Framework.Timer
             }
         }
 
-        /// <summary>
-        /// 是否已被移除
-        /// </summary>
-        private bool m_IsRemoved;
-
-        public void SetRemoved(bool isRemove)
-        {
-            m_IsRemoved = isRemove;
-        }
-
         private TaskType m_Type;
 
         internal void SetType(TaskType type)
@@ -103,7 +93,6 @@ namespace Framework.Timer
             m_Expires = 0;
             m_Interval = 0;
 
-            m_IsRemoved = true;
             m_Type = TaskType.Undefined;
 
         }
@@ -111,11 +100,6 @@ namespace Framework.Timer
         internal bool Valid()
         {
             if (m_Action == null)
-            {
-                return false;
-            }
-
-            if (m_IsRemoved)
             {
                 return false;
             }
@@ -136,6 +120,11 @@ namespace Framework.Timer
         internal bool CanLoop()
         {
             return m_LoopTimes == -1 || m_LoopTimes > 0;
+        }
+
+        internal void SetOnce()
+        {
+            this.m_LoopTimes = 1;
         }
         
         internal void Execute()
