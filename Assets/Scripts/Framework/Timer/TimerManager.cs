@@ -293,8 +293,8 @@ namespace Framework.Timer
         {
             if (expires <= s_Jiffies)
             {
-                // 到期任务
-                return (uint)(s_Jiffies + 1 & k_LevelMask);
+                // 到期任务, 直接执行
+                return (uint)(s_Jiffies & k_LevelMask);
             }
             
             var delta = expires - s_Jiffies;
