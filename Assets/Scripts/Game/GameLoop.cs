@@ -35,7 +35,7 @@ public class GameLoop : MonoBehaviour
         // Test.Timer.TimerTest.TestIntervalTask(1000, 100);
 
         // 压力测试
-        yield return Test.Timer.TimerTest.PressureTest(100000, 100, 1000000000);
+        yield return Test.Timer.TimerTest.PressureTest(1000000, 100, 1000000000);
     }
     
     // Update is called once per frame
