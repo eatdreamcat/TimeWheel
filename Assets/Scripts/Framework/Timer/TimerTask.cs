@@ -108,6 +108,11 @@ namespace Framework.Timer
 
         }
         
+        internal void SetInvalid()
+        {
+            this.Reset();
+        }
+        
         internal bool Valid()
         {
             if (m_Action == null)

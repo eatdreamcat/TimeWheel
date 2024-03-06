@@ -236,17 +236,25 @@ namespace Framework.Timer
                         }
                         else
                         {
-                            RemoveTask(task.ID);
+                            DoRecycle(task.ID);
                         }
                     }
                     else
                     {
-                        RemoveTask(task.ID);
+                        DoRecycle(task.ID);
                     }
                 }
             }
         }
 
+        private static void DoRecycle(int taskId)
+        {
+            if (s_TaskMap.TryRemove(taskId, out var task))
+            {
+                s_TaskPool.Recycle(task);
+            }
+        }
+        
         #region 工具方法
 
         /// <summary>
@@ -572,10 +580,9 @@ namespace Framework.Timer
         
         public static void RemoveTask(int taskId)
         {
-            if (s_TaskMap.TryRemove(taskId, out var task))
+            if (s_TaskMap.TryGetValue(taskId, out var task))
             {
-                // Debug.Log($"Task Remove:{task.ID}, task expires:{task.Expires}");
-                s_TaskPool.Recycle(task);
+                task.SetInvalid();
             }
             
         }
