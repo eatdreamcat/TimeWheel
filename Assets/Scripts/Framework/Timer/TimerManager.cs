@@ -338,21 +338,7 @@ namespace Framework.Timer
             // ReSharper disable once InvalidXmlDocComment
             /**
              *  这里右移当前级对应的精度位，代表对expires降精度。
-             * 例如：
-             *  ① 假设 expires = 123， clk是60
-             *     level = 0时，精度是1，则expires无需移位
-             *     LevelOff是0，LevelMask是63，用 124 & 63 可以求出index = 60
-             *     当前clk是60，要跑到此任务，需要再运行63个clk
-             *
-             *  ② 假设 expires = 124，clk是60
-             *     level = 1时，精度是8，则expires右移3位，得到15，
-             *     LevelOff是64，LevelMask是63，用 16 & 63 可以得出index = 16
-             *     最终index = 64 + 16 = 80
-             *     当前clk是60，要跑到此任务，需要在运行64个clk
-             *      NOTE:
-             *     但是需要注意，此时clk已经跑了60，
-             *     代表第level 2 跑了8格，所以index放在第二级的16格，代表需要再跑8格，正好是64clk
-             *
+             * 
              *     [0-63][64-127]
              */
             int levelShiftBits = (int)(k_LevelClockShiftBits * level);
