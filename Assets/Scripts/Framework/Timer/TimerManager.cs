@@ -22,6 +22,19 @@ namespace Framework.Timer
      *  6    384    262144 ms (~4m)    2097152 steps -   16777215 steps (~34m - ~4h)
      *  7    448   2097152 ms (~34m)  16777216 steps -  134217727 steps (~4h - ~1d)
      *  8    512  16777216 ms (~4h)  134217728 steps - 1073741823 steps (~1d - ~12d)
+     *
+     * HZ  250
+     * Level Offset  Granularity            Range
+     *  0	   0         4 ms                0 ms -        255 ms
+     *  1	  64        32 ms              256 ms -       2047 ms (256ms - ~2s)
+     *  2	 128       256 ms             2048 ms -      16383 ms (~2s - ~16s)
+     *  3	 192      2048 ms (~2s)      16384 ms -     131071 ms (~16s - ~2m)
+     *  4	 256     16384 ms (~16s)    131072 ms -    1048575 ms (~2m - ~17m)
+     *  5	 320    131072 ms (~2m)    1048576 ms -    8388607 ms (~17m - ~2h)
+     *  6	 384   1048576 ms (~17m)   8388608 ms -   67108863 ms (~2h - ~18h)
+     *  7	 448   8388608 ms (~2h)   67108864 ms -  536870911 ms (~18h - ~6d)
+     *  8    512  67108864 ms (~18h) 536870912 ms - 4294967288 ms (~6d - ~49d)
+     *
      * 
      */
     public class TimerManager
@@ -29,7 +42,7 @@ namespace Framework.Timer
         /// <summary>
         /// 频率，即每秒钟Tick多少次
         /// </summary>
-        private const ulong k_HZ = 60;
+        private const ulong k_HZ = 1000;
         
         /// <summary>
         /// 时间轮的级数
@@ -146,28 +159,6 @@ namespace Framework.Timer
             }
         }
         
-        /// <summary>
-        /// TimerManager的步进，需要外部驱动，比如在Mono中的Update驱动
-        /// </summary>
-        /// <param name="deltaInMillisecond">上一次Tick跟这一次的时间间隔，注意这里应该传毫秒数</param>
-        public static void Tick(float deltaInMillisecond)
-        {
-            if (s_TaskMap.Count <= 0)
-            {
-                s_Jiffies = 0;
-                return;
-            }
-            
-            // 计算当前delta time内，可以跑几个jiff
-            int totalJiffCount = Mathf.FloorToInt(deltaInMillisecond / k_MillisecondInOneJiff);
-            // 把计算出来的次数除以2，因为运行callback也需要时间
-            totalJiffCount = (totalJiffCount >> 1) + 1;
-            
-            // 执行
-            PushJiffies(totalJiffCount);
-            
-        }
-
         private static void TaskShift()
         {
             if (s_Jiffies <= 0)
@@ -411,6 +402,28 @@ namespace Framework.Timer
         
         #region 开放接口
 
+        /// <summary>
+        /// TimerManager的步进，需要外部驱动，比如在Mono中的Update驱动
+        /// </summary>
+        /// <param name="deltaInMillisecond">上一次Tick跟这一次的时间间隔，注意这里应该传毫秒数</param>
+        public static void Tick(float deltaInMillisecond)
+        {
+            if (s_TaskMap.Count <= 0)
+            {
+                s_Jiffies = 0;
+                return;
+            }
+            
+            // 计算当前delta time内，可以跑几个jiff
+            int totalJiffCount = Mathf.FloorToInt(deltaInMillisecond / k_MillisecondInOneJiff);
+            // 把计算出来的次数除以2，因为运行callback也需要时间
+            totalJiffCount = (totalJiffCount >> 1) + 1;
+            
+            // 执行
+            PushJiffies(totalJiffCount);
+            
+        }
+        
         /// <summary>
         /// 设置一个异步延迟回调
         /// </summary>
