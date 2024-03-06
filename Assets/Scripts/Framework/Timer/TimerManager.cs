@@ -42,7 +42,7 @@ namespace Framework.Timer
         /// <summary>
         /// 频率，即每秒钟Tick多少次
         /// </summary>
-        private const ulong k_HZ = 1000;
+        private const ulong k_HZ = 60;
         
         /// <summary>
         /// 时间轮的级数
@@ -311,10 +311,10 @@ namespace Framework.Timer
             if (delta >= k_WheelTimeoutCutoff)
             {
                 expires = s_Jiffies + k_WheelTimeoutMax;
-                return CalculateIndex(expires, k_Depth - 1, LevelStartJiffies(k_Depth - 1));
+                
             }
 
-            throw new Exception($"WheelIndex计算出错, 非法的delta:{delta}");
+            return CalculateIndex(expires, k_Depth - 1, LevelStartJiffies(k_Depth - 1));
         }
 
         /// <summary>
