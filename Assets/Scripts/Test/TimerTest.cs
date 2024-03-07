@@ -132,5 +132,20 @@ namespace Test.Timer
                 
             }, 0, 1);
         }
+
+        public static void TestRemoveTask()
+        {
+            var taskId = TimerManager.AddLoopTask(1000f, (o, o1) =>
+            {
+                Debug.Log("Task 即将被删除。。。: " + DateTime.Now + " : " + DateTime.Now.Millisecond);
+                
+            }, 0, 0);
+
+            TimerManager.AddDelayTask(5000f, (o1, o2) =>
+            {
+                Debug.Log($"删除Task:{TimerManager.RemoveTask(taskId)} " + DateTime.Now + " : " + DateTime.Now.Millisecond);
+                
+            }, 1, 1);
+        }
     }
 }

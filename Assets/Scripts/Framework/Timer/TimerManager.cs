@@ -135,13 +135,13 @@ namespace Framework.Timer
 
         }
 
-        private static void UpdateTaskExpires(TimerTask task, int delay = 0)
+        private static void UpdateTaskExpires(TimerTask task, float delay = 0)
         {
             task.Expires = 
                 MillisecondsToJiffies(delay) + task.Interval + s_Jiffies;
         }
         
-        private static bool AddTask(TimerTask task, int delay = 0)
+        private static bool AddTask(TimerTask task, float delay = 0)
         {
             if (s_TaskMap.TryAdd(task.ID, task))
             {
@@ -370,7 +370,7 @@ namespace Framework.Timer
             return -1;
         }
         
-        private static int AddTimeoutTask<T1, T2>(int delay, Action<object, object> callback, T1 param1, T2 param2)
+        private static int AddTimeoutTask<T1, T2>(float delay, Action<object, object> callback, T1 param1, T2 param2)
         {
             if (delay < 0)
             {
@@ -444,7 +444,7 @@ namespace Framework.Timer
         /// <typeparam name="T1">参数1类型</typeparam>
         /// <typeparam name="T2">参数2类型</typeparam>
         /// <returns>返回 Task ID</returns>
-        public static int AddDelayTask<T1, T2>(int delay, Action<object, object> callback, T1 param1, T2 param2)
+        public static int AddDelayTask<T1, T2>(float delay, Action<object, object> callback, T1 param1, T2 param2)
         {
             return AddTimeoutTask(delay, callback, param1, param2);
         }

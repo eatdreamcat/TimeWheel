@@ -35,7 +35,10 @@ public class GameLoop : MonoBehaviour
         // Test.Timer.TimerTest.TestIntervalTask(1000, 100);
         
         // 测试修改时间间隔
-        Test.Timer.TimerTest.TestModifyInterval();
+        // Test.Timer.TimerTest.TestModifyInterval();
+        
+        // 测试删除定时器
+        Test.Timer.TimerTest.TestRemoveTask();
         
         // 压力测试
         // yield return Test.Timer.TimerTest.PressureTest(1000000, 100, 1000000000);
