@@ -4,13 +4,6 @@ using Framework.ObjectPool;
 
 namespace Framework.Timer
 {
-    public enum TaskType
-    {
-        Undefined,
-        Sync,
-        Async
-    }
-    
     internal class TimerTask : IPoolable
     {
         private static int s_ID = 0;
@@ -29,6 +22,20 @@ namespace Framework.Timer
             set
             {
                 m_Interval = value;
+            }
+        }
+
+        /// <summary>
+        /// 用于暂存对应的bucket下标，方便移动和删除
+        /// </summary>
+        private int m_BucketIndex;
+
+        internal int BucketIndex
+        {
+            get => m_BucketIndex;
+            set
+            {
+                m_BucketIndex = value;
             }
         }
         
@@ -60,13 +67,6 @@ namespace Framework.Timer
             }
         }
 
-        private TaskType m_Type;
-
-        internal void SetType(TaskType type)
-        {
-            m_Type = type;
-        }
-        
         private Action<object, object> m_Action;
         private object m_Param1;
         private object m_Param2;
@@ -103,9 +103,7 @@ namespace Framework.Timer
             m_LoopTimes = -1;
             m_Expires = 0;
             m_Interval = 0;
-
-            m_Type = TaskType.Undefined;
-
+            
         }
         
         internal void SetInvalid()
@@ -121,11 +119,6 @@ namespace Framework.Timer
             }
 
             if (m_LoopTimes == 0)
-            {
-                return false;
-            }
-
-            if (m_Type == TaskType.Undefined)
             {
                 return false;
             }
@@ -150,17 +143,8 @@ namespace Framework.Timer
                 --m_LoopTimes;
             }
 
-            if (m_Type == TaskType.Sync)
-            {
-                m_Action.Invoke(m_Param1, m_Param2);
-            }
-            else
-            {
-                Task.Run(() =>
-                {
-                    m_Action.Invoke(m_Param1, m_Param2);
-                });
-            }
+            m_Action.Invoke(m_Param1, m_Param2);
+            
         }
         
         #region 对象池接口

@@ -16,19 +16,17 @@ namespace Test.Timer
            Debug.Log($"测试延迟任务，任务总个数 {count} 个, 每个任务延迟间隔 {step} ms");
            for (int i = 1; i <= count; ++i)
            {
-               TimerManager.SetTimeoutSync((uint)(i * step + offset - 1) , (index, step) =>
+               TimerManager.AddDelayTask(i * step + offset - 1 , (index, step) =>
                {
                    // Debug.Assert(TimerManager.Jiffies == (ulong)((int)index * (int)step + offset - 1), 
                    //     " 时刻不准确 ");
                   
-                   Debug.Log($"Jiffies:{TimerManager.Jiffies}, " +
-                             $"Delay task {index} executed:{DateTime.Now}:{DateTime.Now.Millisecond}");
+                   Debug.Log($"Delay task {index} executed:{DateTime.Now}:{DateTime.Now.Millisecond}");
                 
                    
                }, i, step);
            }
-            
-           Debug.Log($"测试延迟任务添加完成：{TimerManager.Jiffies}");
+           
         }
 
         public static void TestIndexInLevelsWithJiffies()
@@ -72,15 +70,13 @@ namespace Test.Timer
             Debug.Log($"测试延迟任务，任务总个数 {count} 个, 每个任务延迟间隔 {step} ms");
             for (int i = 1; i <= count; ++i)
             {
-                TimerManager.SetTimeoutSync((uint)(i * step), (index, o2) =>
+                TimerManager.AddDelayTask(i * step, (index, o2) =>
                 {
-                    Debug.Log($"Jiffies:{TimerManager.Jiffies}, " +
-                              $"Delay task {index} executed:{DateTime.Now}:{DateTime.Now.Millisecond}");
+                    Debug.Log($"Delay task {index} executed:{DateTime.Now}:{DateTime.Now.Millisecond}");
                 
                 }, i, 1);
             }
             
-            Debug.Log($"测试延迟任务添加完成：{TimerManager.Jiffies}");
         }
 
         public static void TestIntervalTask(int count, int step)
@@ -88,10 +84,9 @@ namespace Test.Timer
             Debug.Log($"测试循环任务， 任务个数 {count}, 间隔递增： {step} ms");
             for (int i = 1; i <= count; ++i)
             {
-                TimerManager.SetIntervalSync((uint)(i * step), (index, o2) =>
+                TimerManager.AddLoopTask((i * step), (index, o2) =>
                 {
-                    Debug.Log($"Jiffies:{TimerManager.Jiffies}, " +
-                              $"Interval task {index} executed:{DateTime.Now}:{DateTime.Now.Millisecond}");
+                    Debug.Log($"Interval task {index} executed:{DateTime.Now}:{DateTime.Now.Millisecond}");
                 
                 }, i, 1);
             }
@@ -107,7 +102,7 @@ namespace Test.Timer
                 {
                     count--;
                     
-                    TimerManager.SetIntervalSync((uint)(Random.Range(minInterval, maxInterval)), 
+                    TimerManager.AddLoopTask((Random.Range(minInterval, maxInterval)), 
                         (index, o2) =>
                     {
                         
@@ -118,6 +113,24 @@ namespace Test.Timer
             }
             
             Debug.Log($"### 压测任务添加完成 ###");
+        }
+
+        public static void TestModifyInterval()
+        {
+            var lastTime = DateTime.Now;
+            var taskId = TimerManager.AddLoopTask(16.6f, (o1, o2) =>
+            {
+                Debug.Log($"测试修改任务间隔时间：{(DateTime.Now - lastTime).Milliseconds} ms");
+                lastTime = DateTime.Now;
+
+            }, 0, 1);
+
+            TimerManager.AddDelayTask(1000, (o, o1) =>
+            {
+                Debug.Log("修改时间间隔");
+                TimerManager.ModifyInterval(taskId, 33.333f);
+                
+            }, 0, 1);
         }
     }
 }

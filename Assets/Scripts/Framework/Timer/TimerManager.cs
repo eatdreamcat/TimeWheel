@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Runtime.CompilerServices;
-using System.Threading;
 using Framework.ObjectPool;
 using UnityEngine;
 
@@ -35,10 +33,12 @@ namespace Framework.Timer
      *  7	 448   8388608 ms (~2h)   67108864 ms -  536870911 ms (~18h - ~6d)
      *  8    512  67108864 ms (~18h) 536870912 ms - 4294967288 ms (~6d - ~49d)
      *
-     * 
+     *
      */
     public class TimerManager
     {
+        private static readonly string s_Modular = "Framework.Timer.TimerManager";
+        
         /// <summary>
         /// 频率，即每秒钟Tick多少次
         /// </summary>
@@ -58,17 +58,17 @@ namespace Framework.Timer
         /// 与LevelBits对应，代表每一级的槽位个数
         /// 如：默认LevelBits是6位，则代表的槽位个数就是 64 个。
         /// </summary>
-        private const ulong k_LevelSize = (1 << k_LevelBits);
+        private const int k_LevelSize = (1 << k_LevelBits);
         
         /// <summary>
         /// 每一级槽位的范围Mask，比如64个槽位，则范围是0~63
         /// </summary>
-        private const ulong k_LevelMask = k_LevelSize - 1;
+        private const int k_LevelMask = k_LevelSize - 1;
         
         /// <summary>
         /// 所有级别轮盘的槽位总数
         /// </summary>
-        private const ulong k_WheelSize = k_LevelSize * k_Depth;
+        private const int k_WheelSize = k_LevelSize * k_Depth;
 
         /// <summary>
         /// 每一个级别的进位倍数位
@@ -81,7 +81,11 @@ namespace Framework.Timer
         /// </summary>
         private const ulong k_WheelTimeoutCutoff = ((k_LevelSize) << ((k_Depth - 1) * k_LevelClockShiftBits)) - 1;
 
+        /// <summary>
+        /// 最大轮的粒度
+        /// </summary>
         private const ulong k_LastLevelGranularity = (1UL << (k_Depth - 1) * k_LevelClockShiftBits);
+        
         /// <summary>
         /// 最大的到期时间, 最后一个bucket
         /// </summary>
@@ -99,57 +103,51 @@ namespace Framework.Timer
         
         // 从启动到当前的jiff数
         private static ulong s_Jiffies = 0;
-
-    // TODO：移除测试代码
-        public static ulong Jiffies => s_Jiffies;
-
         
-
         // Task对象池
         private static ObjectPool<TimerTask> s_TaskPool = new ();
         
         // 用于保存当前所有in queue的Task
-        private static ConcurrentDictionary<int, TimerTask> s_TaskMap = new ();
+        private static Dictionary<int, TimerTask> s_TaskMap = new ();
 
         /// <summary>
         /// 时间轮
         /// </summary>
-        private static List<ConcurrentQueue<TimerTask>> s_TaskWheelList = new((int)k_WheelSize);
-        
-        // private static ReaderWriterLockSlim s_LockSlim = new ();
-
+        /// TODO: 用LinkedList频繁增删可能会导致大量GC，因为内部维护LinkedListNode对象？
+        private static List<LinkedList<TimerTask>> s_TaskWheelList = new(k_WheelSize);
+       
         static TimerManager()
         {
-            for (int i = 0; i < (int)k_WheelSize; ++i)
+            for (int i = 0; i < k_WheelSize; ++i)
             {
-                s_TaskWheelList.Add(new ConcurrentQueue<TimerTask>());
+                s_TaskWheelList.Add(new LinkedList<TimerTask>());
             }
         }
         
-        private static void AddToScheduler(TimerTask task, uint delay = 0)
+        private static void AddToScheduler(TimerTask task)
         {
             
-            var index = (int)CalculateWheelIndex(task.Expires);
+            var index = CalculateWheelIndex(task.Expires);
             
-            // TODO: 考虑到用户是否可能在子线程调用 SetInterval 来添加Task
-            // TODO:  是否需要加锁？
-            s_TaskWheelList[index].Enqueue(task);
+            s_TaskWheelList[index].AddLast(task);
             
+            task.BucketIndex = index;
+
         }
 
-        private static void UpdateTaskExpires(TimerTask task, uint delay = 0)
+        private static void UpdateTaskExpires(TimerTask task, int delay = 0)
         {
             task.Expires = 
                 MillisecondsToJiffies(delay) + task.Interval + s_Jiffies;
         }
         
-        private static bool AddTask(TimerTask task, uint delay = 0)
+        private static bool AddTask(TimerTask task, int delay = 0)
         {
             if (s_TaskMap.TryAdd(task.ID, task))
             {
                 UpdateTaskExpires(task, delay);
                 
-                AddToScheduler(task, delay);
+                AddToScheduler(task);
                 
                 return true;
             }
@@ -169,23 +167,16 @@ namespace Framework.Timer
             var levels = k_Depth;
             while (--levels >= 1)
             {
-                if ((s_Jiffies & (ulong)((1 << levels * k_LevelClockShiftBits) - 1)) == 0)
+                if ((s_Jiffies & ((1ul << levels * k_LevelClockShiftBits) - 1)) == 0)
                 {
-                    var index = CalculateIndex(s_Jiffies - 1, (uint)levels, 0ul);
-                    var taskBucket = s_TaskWheelList[(int)index];
+                    var index = CalculateIndex(s_Jiffies - 1, levels, 0ul);
+                    var taskLinkedList = s_TaskWheelList[(int)index];
                  
-                    while (taskBucket.Count > 0)
+                    while (taskLinkedList.Count > 0)
                     {
-                        var count = taskBucket.Count;
-                        if (taskBucket.TryDequeue(out var task))
-                        {
-                            AddToScheduler(task);
-
-                            if (count == taskBucket.Count)
-                            {
-                                throw new Exception(" error !!! ");
-                            }
-                        }
+                        var first = taskLinkedList.First;
+                        taskLinkedList.RemoveFirst();
+                        AddToScheduler(first.Value);
                     }
                 }
             }
@@ -201,46 +192,45 @@ namespace Framework.Timer
                 
                 TaskShift();
                 
-                ExecuteTasks(currClock);
-                
                 ++s_Jiffies;
             }
         }
 
         private static void ExecuteTasks(int clock)
         {
-            var expiredTaskQueue = s_TaskWheelList[clock];
-            // TODO： 是否有必要加锁， 本身ConcurrentQueue就是线程安全，但是外部的时间轮List不是线程安全
-            // TODO:  如果加锁，那其实应该用Try包裹起来，因为无法确定用户的Callback是否会抛异常
-            while (expiredTaskQueue.Count > 0)
+            var expiredTaskLinkedList = s_TaskWheelList[clock];
+          
+            while (expiredTaskLinkedList.Count > 0)
             {
-                if (expiredTaskQueue.TryDequeue(out var task))
+                var first = expiredTaskLinkedList.First;
+                expiredTaskLinkedList.RemoveFirst();
+                
+                var task = first.Value;
+                if (task.Valid())
                 {
-                    if (task.Valid())
-                    {
-                        task.Execute();
+                    task.Execute();
 
-                        if (task.CanLoop())
-                        {
-                            UpdateTaskExpires(task);
-                            AddToScheduler(task);
-                        }
-                        else
-                        {
-                            DoRecycle(task.ID);
-                        }
+                    if (task.CanLoop())
+                    {
+                        UpdateTaskExpires(task);
+                        AddToScheduler(task);
                     }
                     else
                     {
                         DoRecycle(task.ID);
                     }
                 }
+                else
+                {
+                    DoRecycle(task.ID);
+                }
+                
             }
         }
 
         private static void DoRecycle(int taskId)
         {
-            if (s_TaskMap.TryRemove(taskId, out var task))
+            if (s_TaskMap.Remove(taskId, out var task))
             {
                 s_TaskPool.Recycle(task);
             }
@@ -253,7 +243,7 @@ namespace Framework.Timer
         /// </summary>
         /// <param name="millisecond"></param>
         /// <returns></returns>
-        private static ulong MillisecondsToJiffies(uint millisecond)
+        private static ulong MillisecondsToJiffies(float millisecond)
         {
             return (ulong)Mathf.CeilToInt(millisecond / k_MillisecondInOneJiff);
         }
@@ -263,24 +253,18 @@ namespace Framework.Timer
         /// </summary>
         /// <param name="level">时间轮的级别</param>
         /// <returns>对应级别的Jiffies起点</returns>
-        private static ulong LevelStartJiffies(uint level)
+        private static ulong LevelStartJiffies(int level)
         {
-            return k_LevelSize << (int)((level - 1u) * k_LevelClockShiftBits);
+            return (ulong)k_LevelSize << ((level - 1) * k_LevelClockShiftBits);
         }
-        //
-        // private static ulong LevelGranularity(int level)
-        // {
-        //     int shift = level * k_LevelClockShiftBits;
-        //     return 1UL << shift;
-        // }
-        
+     
         /// <summary>
         /// 获取每一级的bucket下标起点
         /// </summary>
         /// <returns></returns>
-        private static uint GetLevelOff(uint level)
+        private static int GetLevelOff(int level)
         {
-            return level * (int)k_LevelSize;
+            return level * k_LevelSize;
         }
         
         /// <summary>
@@ -288,22 +272,22 @@ namespace Framework.Timer
         /// </summary>
         /// <param name="expires"></param>
         /// <returns></returns>
-        private static uint CalculateWheelIndex(ulong expires)
+        private static int CalculateWheelIndex(ulong expires)
         {
             if (expires <= s_Jiffies)
             {
                 // 到期任务, 直接执行
-                return (uint)(s_Jiffies & k_LevelMask);
+                return (int)(s_Jiffies & k_LevelMask);
             }
             
             var delta = expires - s_Jiffies;
             
             // 从 1 到 8 个level
-            for (uint level = 1u; level < k_Depth; ++level)
+            for (int level = 1; level < k_Depth; ++level)
             {
                 if (delta < LevelStartJiffies(level))
                 {
-                    return CalculateIndex(expires, level - 1u, LevelStartJiffies(level - 1));
+                    return CalculateIndex(expires, level - 1, LevelStartJiffies(level - 1));
                 }
             }
 
@@ -324,69 +308,86 @@ namespace Framework.Timer
         /// <param name="level">时间轮等级</param>
         /// <param name="levelStartJiffies">当前level下的jiffies起点</param>
         /// <returns></returns>
-        private static uint CalculateIndex(ulong expires, uint level, ulong levelStartJiffies)
+        private static int CalculateIndex(ulong expires, int level, ulong levelStartJiffies)
         {
             // ReSharper disable once InvalidXmlDocComment
             /**
              *  这里右移当前级对应的精度位，代表对expires降精度。
-             * 
+             *
              *     [0-63][64-127]
              */
-            int levelShiftBits = (int)(k_LevelClockShiftBits * level);
+            int levelShiftBits = k_LevelClockShiftBits * level;
             expires -= levelStartJiffies;
             expires = (expires >> levelShiftBits);
-            return GetLevelOff(level) + (uint)(expires & k_LevelMask);
+            return GetLevelOff(level) + (int)(expires & k_LevelMask);
         }
         
         #endregion
-
-        private static int SetInterval<T1, T2>(uint interval, Action<object, object> callback,
-            T1 param1, T2 param2, int loopTimes, uint delay, TaskType type)
+        
+        private static int AddIntervalTask<T1, T2>(float interval, Action<object, object> callback,
+            T1 param1, T2 param2, int loopTimes, int delay)
         {
-            if (interval <= 0)
+            if (interval < 0)
             {
-                Debug.LogWarning("Interval 应该是一个大于0的值");
+                Debug.LogWarning($"[{s_Modular}] AddIntervalTask : Interval 应该是一个非负的值");
+            }
+            
+            if (delay < 0)
+            {
+                Debug.LogWarning($"[{s_Modular}] AddIntervalTask : Delay 应该是一个非负的值");
             }
 
             if (callback == null)
             {
-                Debug.LogError("Callback 为空");
-
+                
+                Debug.LogError($"[{s_Modular}] AddIntervalTask : Callback 为空");
+                
                 return -1;
             }
 
+            if (loopTimes < -1)
+            {
+                Debug.LogWarning($"[{s_Modular}] AddIntervalTask : loopTimes 应该是一个大于-1的值， -1代表无限循环");
+            }
+            
+            interval = Math.Max(0, interval);
+            delay = Math.Max(0, delay);
             loopTimes = Math.Max(-1, loopTimes);
             
             var task = s_TaskPool.Get();
             task.LoopTimes = loopTimes;
             task.Interval = MillisecondsToJiffies(interval);
             task.SetCallback(callback, param1, param2);
-            task.SetType(type);
-            
-            if (AddTask(task))
+       
+            if (AddTask(task, delay))
             {
                 return task.ID;
             }
 
-            Debug.LogError($"Task 添加失败: {task.ID}");
+            Debug.LogError($"[{s_Modular}] AddIntervalTask : Task 添加失败: {task.ID}");
             s_TaskPool.Recycle(task);
             
             return -1;
         }
         
-        private static int SetTimeout<T1, T2>(uint delay, Action<object, object> callback, T1 param1, T2 param2,
-            TaskType type)
+        private static int AddTimeoutTask<T1, T2>(int delay, Action<object, object> callback, T1 param1, T2 param2)
         {
+            if (delay < 0)
+            {
+                Debug.LogWarning($"[{s_Modular}] AddIntervalTask : Delay 应该是一个非负的值");
+            }
+            
+            
             if (callback == null)
             {
-                Debug.LogError("Callback 为空");
+                Debug.LogError($"[{s_Modular}] AddTimeoutTask : Callback 为空");
 
                 return -1;
             }
             
             var task = s_TaskPool.Get();
             task.SetCallback(callback, param1, param2);
-            task.SetType(type);
+            delay = Math.Max(0, delay);
             task.SetOnce();
             
             if (AddTask(task, delay))
@@ -394,7 +395,7 @@ namespace Framework.Timer
                 return task.ID;
             }
             
-            Debug.LogError($"Task 添加失败:{task.ID}");
+            Debug.LogError($"[{s_Modular}] AddIntervalTask : Task 添加失败: {task.ID}");
             s_TaskPool.Recycle(task);
             
             return -1;
@@ -416,27 +417,21 @@ namespace Framework.Timer
             
             // 计算当前delta time内，可以跑几个jiff
             int totalJiffCount = Mathf.FloorToInt(deltaInMillisecond / k_MillisecondInOneJiff);
-            // 把计算出来的次数除以2，因为运行callback也需要时间
+            // Debug.Log("totalJiffCount:" + totalJiffCount+ ",  totalJiffCount:" + deltaInMillisecond);
+            
+            /**
+             * 
+             *  Note:  把计算出来的次数除以2，因为运行callback也需要时间。 
+             *         在Review会上，反馈说需要去掉，不需要留时间片给callback
+             *         但是实测下来，留时间片的精准度更好一些
+             * 
+             */
+                      
             totalJiffCount = (totalJiffCount >> 1) + 1;
             
             // 执行
             PushJiffies(totalJiffCount);
             
-        }
-        
-        /// <summary>
-        /// 设置一个异步延迟回调
-        /// </summary>
-        /// <param name="delay">延迟的毫秒数</param> 
-        /// <param name="callback">回调方法</param> 
-        /// <param name="param1">回调参数1</param> 
-        /// <param name="param2">回调参数2</param> 
-        /// <typeparam name="T1">参数1类型</typeparam>
-        /// <typeparam name="T2">参数2类型</typeparam>
-        /// <returns>返回 Task ID</returns>
-        public static int SetTimeoutAsync<T1, T2>(uint delay, Action<object, object> callback, T1 param1, T2 param2)
-        {
-            return SetTimeout(delay, callback, param1, param2, TaskType.Async);
         }
         
         /// <summary>
@@ -449,29 +444,11 @@ namespace Framework.Timer
         /// <typeparam name="T1">参数1类型</typeparam>
         /// <typeparam name="T2">参数2类型</typeparam>
         /// <returns>返回 Task ID</returns>
-        public static int SetTimeoutSync<T1, T2>(uint delay, Action<object, object> callback, T1 param1, T2 param2)
+        public static int AddDelayTask<T1, T2>(int delay, Action<object, object> callback, T1 param1, T2 param2)
         {
-            return SetTimeout(delay, callback, param1, param2, TaskType.Sync);
+            return AddTimeoutTask(delay, callback, param1, param2);
         }
-
-        /// <summary>
-        /// 设置一个重复执行的异步任务
-        /// </summary>
-        /// <param name="interval">每次间隔毫秒数</param>
-        /// <param name="callback">回调函数</param>
-        /// <param name="param1">回调参数1</param>
-        /// <param name="param2">回调参数2</param>
-        /// <param name="loopTimes">重复次数，默认-1代表无限重复</param>
-        /// <param name="delay">首次执行的延迟毫秒数</param>
-        /// <typeparam name="T1">参数类型1</typeparam>
-        /// <typeparam name="T2">参数类型2</typeparam>
-        /// <returns>返回 Task ID</returns>
-        public static int SetIntervalAsync<T1, T2>(uint interval, Action<object, object> callback,
-            T1 param1, T2 param2, int loopTimes = -1, uint delay = 0)
-        {
-            return SetInterval(interval, callback, param1, param2, loopTimes, delay, TaskType.Async);
-        }
-
+        
         /// <summary>
         /// 设置一个重复执行的同步任务
         /// </summary>
@@ -484,10 +461,10 @@ namespace Framework.Timer
         /// <typeparam name="T1">参数类型1</typeparam>
         /// <typeparam name="T2">参数类型2</typeparam>
         /// <returns>返回 Task ID</returns>
-        public static int SetIntervalSync<T1, T2>(uint interval, Action<object, object> callback,
-            T1 param1, T2 param2, int loopTimes = -1, uint delay = 0)
+        public static int AddLoopTask<T1, T2>(float interval, Action<object, object> callback,
+            T1 param1, T2 param2, int loopTimes = -1, int delay = 0)
         {
-            return SetInterval(interval, callback, param1, param2, loopTimes, delay, TaskType.Sync);
+            return AddIntervalTask(interval, callback, param1, param2, loopTimes, delay);
         }
         
         /// <summary>
@@ -495,95 +472,180 @@ namespace Framework.Timer
         /// </summary>
         /// <param name="taskId">任务ID</param>
         /// <param name="interval">间隔毫秒数</param>
-        public static void ModifyInterval(uint taskId, uint interval)
+        public static bool ModifyInterval(int taskId, float interval)
         {
             if (interval <= 0)
             {
-                Debug.LogWarning("Interval 应该是一个大于0的值");
+                Debug.LogError($"[{s_Modular}] ModifyInterval : Interval 应该是一个非负的值");
+                return false;
             }
             
-            // TODO
+            if (s_TaskMap.TryGetValue(taskId, out var task))
+            {
+                var oldBucket = task.BucketIndex;
+
+                if (oldBucket >= 0 && oldBucket < k_WheelSize)
+                {
+                    task.Interval = MillisecondsToJiffies(interval);
+                    
+                    UpdateTaskExpires(task);
+
+                    s_TaskWheelList[oldBucket].Remove(task);
+                    
+                    AddToScheduler(task);
+
+                    return true;
+                }
+                
+                Debug.LogError($"[{s_Modular}] ModifyInterval : task：{taskId} 对应的bucket 不存在：{oldBucket}");
+                
+
+                return false;
+            }
+            
+            Debug.LogError($"[{s_Modular}] ModifyInterval : task 不存在：{taskId}");
+            return false;
         }
 
         /// <summary>
-        /// 修改任务的延迟
+        /// 修改任务的Loop次数，-1代表无限循环
         /// </summary>
-        /// <param name="taskId">任务ID</param>
+        /// <param name="taskId"></param>
+        /// <param name="loopTimes"></param>
+        /// <returns></returns>
+        public static bool ModifyLoopTimes(int taskId, int loopTimes)
+        {
+            if (loopTimes < -1)
+            {
+                Debug.LogError($"[{s_Modular}] ModifyLoopTimes : loopTimes 应该是一个大于-1的值， -1代表无限循环");
+                return false;
+            }
+
+            if (s_TaskMap.TryGetValue(taskId, out var task))
+            {
+                task.LoopTimes = loopTimes;
+                return true;
+            }
+            
+            Debug.LogError($"[{s_Modular}] ModifyLoopTimes : task 不存在：{taskId}");
+            return false;
+        }
+
+        /// <summary>
+        /// 修改任务的delay值
+        /// </summary>
+        /// <param name="taskId">非负的id</param>
         /// <param name="delay">延迟毫秒数</param>
-        public static void ModifyDelay(uint taskId, uint delay)
+        /// <returns></returns>
+        public static bool ModifyDelay(int taskId, int delay)
         {
-            if (s_TaskMap.TryGetValue((int)taskId, out var task))
+            if (delay <= 0)
             {
-                UpdateTaskExpires(task, delay);
-            }
-        }
+                Debug.LogError($"[{s_Modular}] ModifyDelay : Delay 应该是一个非负的值");
 
-        public static void ModifyCallback<T1, T2>(uint taskId, Action<object, object> callback, 
-            T1 param1, T2 param2, TaskType type)
+                return false;
+            }
+            
+            
+            if (s_TaskMap.TryGetValue(taskId, out var task))
+            {
+                var oldBucket = task.BucketIndex;
+
+                if (oldBucket >= 0 && oldBucket < k_WheelSize)
+                {
+                    UpdateTaskExpires(task, delay);
+
+                    s_TaskWheelList[oldBucket].Remove(task);
+                    
+                    AddToScheduler(task);
+
+                    return true;
+                }
+                
+                Debug.LogError($"[{s_Modular}] ModifyDelay : task：{taskId} 对应的bucket 不存在：{oldBucket}");
+                
+
+                return false;
+            }
+            
+            Debug.LogError($"[{s_Modular}] ModifyDelay : task 不存在：{taskId}");
+            return false;
+        }
+        
+        /// <summary>
+        /// 修改任务的callback跟对应的参数
+        /// </summary>
+        /// <param name="taskId"></param>
+        /// <param name="callback"></param>
+        /// <param name="param1"></param>
+        /// <param name="param2"></param>
+        /// <typeparam name="T1"></typeparam>
+        /// <typeparam name="T2"></typeparam>
+        /// <returns></returns>
+        public static bool ModifyCallback<T1, T2>(int taskId, Action<object, object> callback, T1 param1, T2 param2)
         {
-            if (s_TaskMap.TryGetValue((int)taskId, out var task))
+            if (s_TaskMap.TryGetValue(taskId, out var task))
             {
                 task.SetCallback(callback, param1, param2);
-                task.SetType(type);
+                return true;
             }
+            
+            Debug.LogError($"[{s_Modular}] ModifyCallback : task 不存在：{taskId}");
+            return false;
         }
-        
-        public static void ModifyCallback<T1, T2>(uint taskId, Action<object, object> callback, T1 param1, T2 param2)
+       
+        /// <summary>
+        /// 修改任务的callback
+        /// </summary>
+        /// <param name="taskId"></param>
+        /// <param name="callback"></param>
+        /// <returns></returns>
+        public static bool ModifyCallback(int taskId, Action<object, object> callback)
         {
-            if (s_TaskMap.TryGetValue((int)taskId, out var task))
-            {
-                task.SetCallback(callback, param1, param2);
-            }
-        }
-        
-        public static void ModifyCallback(uint taskId, Action<object, object> callback, TaskType type)
-        {
-            if (s_TaskMap.TryGetValue((int)taskId, out var task))
-            {
-                task.SetCallback(callback);
-                task.SetType(type);
-            }
-        }
-
-        public static void ModifyCallback(uint taskId, Action<object, object> callback)
-        {
-            if (s_TaskMap.TryGetValue((int)taskId, out var task))
+            if (s_TaskMap.TryGetValue(taskId, out var task))
             {
                 task.SetCallback(callback);
+                return true;
             }
+            
+            Debug.LogError($"[{s_Modular}] ModifyCallback : task 不存在：{taskId}");
+            return false;
+            
         }
         
-        public static void ModifyParameters<T1, T2>(uint taskId, T1 param1, T2 param2)
+        /// <summary>
+        /// 修改任务回调的参数
+        /// </summary>
+        /// <param name="taskId"></param>
+        /// <param name="param1"></param>
+        /// <param name="param2"></param>
+        /// <typeparam name="T1"></typeparam>
+        /// <typeparam name="T2"></typeparam>
+        /// <returns></returns>
+        public static bool ModifyParameters<T1, T2>(uint taskId, T1 param1, T2 param2)
         {
             if (s_TaskMap.TryGetValue((int)taskId, out var task))
             {
                 task.SetParameters(param1, param2);
+                return true;
             }
+            
+            Debug.LogError($"[{s_Modular}] ModifyParameters : task 不存在：{taskId}");
+            return false;
         }
-
-        public static void ModifyToSyncTask(uint taskId)
-        {
-            if (s_TaskMap.TryGetValue((int)taskId, out var task))
-            {
-                task.SetType(TaskType.Sync);
-            }
-        }
-
-        public static void ModifyToAsyncTask(uint taskId)
-        {
-            if (s_TaskMap.TryGetValue((int)taskId, out var task))
-            {
-                task.SetType(TaskType.Async);
-            }
-        }
-        
-        public static void RemoveTask(int taskId)
+       
+        public static bool RemoveTask(int taskId)
         {
             if (s_TaskMap.TryGetValue(taskId, out var task))
             {
                 task.SetInvalid();
+                return true;
             }
+
+            Debug.LogError($"[{s_Modular}] RemoveTask : task 不存在：{taskId}");
             
+            return false;
+
         }
         
         #endregion
